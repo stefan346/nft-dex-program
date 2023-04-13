@@ -1,0 +1,7 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./nft-clob/programs/nft-clob/Cargo.toml",
+        "./nft-clob/programs/nft-clob/Cargo.toml"
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
+}
