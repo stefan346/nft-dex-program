@@ -3,7 +3,8 @@ use anchor_lang::prelude::*;
 use super::{Order, RBTree};
 
 /// Central Limit Order Book
-#[account(zero_copy)]
+#[account(zero_copy(unsafe))]
+#[repr(C)]
 pub struct Book {
     pub bids: RBTree<u64, Order>, // Buy orders.
     pub asks: RBTree<u64, Order>, // Sell orders.
