@@ -1,9 +1,12 @@
+use std::num::NonZeroU64;
+
 use anchor_lang::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
 use super::NewOrderSingle;
 
 #[zero_copy]
+#[derive(Debug)]
 pub struct Order {
     pub price: u64,    // Limit price per unit of quantity.
     cum_qty: u64,      // Amount executed.
@@ -23,6 +26,22 @@ impl Order {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.price = 0;
+        self.cum_qty = 0;
+        self.leaves_qty = 0;
+        self.avg_px = 0;
+        self.maker = Pubkey::default()
+    }
+
+    pub fn get_leaves_qty(&self) -> u64 {
+        self.leaves_qty
+    }
+
+    pub fn get_cum_qty(&self) -> u64 {
+        self.cum_qty
+    }
+
     pub fn is_partially_filed(&self) -> bool {
         self.cum_qty > 0
     }
@@ -32,6 +51,9 @@ impl Order {
     }
 
     pub fn is_better_than(&self, other: &Order, is_buy: bool) -> bool {
+        if other.price == 0 {
+            return true;
+        }
         if is_buy {
             self.price > other.price
         } else {
@@ -53,6 +75,12 @@ impl Order {
 
         self.cum_qty += match_qty;
         self.leaves_qty -= match_qty;
+
+        new_order.leaves_qty -= match_qty;
+        new_order.cum_qty += match_qty;
+        
+        new_order.avg_px = (new_order.cum_qty * new_order.avg_px + match_qty * new_order.price)
+            / (new_order.cum_qty + match_qty);
     }
 
     pub fn is_tombstone(&self) -> bool {

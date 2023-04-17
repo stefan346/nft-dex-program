@@ -1,18 +1,88 @@
 use std::collections::LinkedList;
+use std::mem::size_of;
 
 use anchor_lang::prelude::Pubkey;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use nft_clob::account_states::{Book, Order};
+use nft_clob::account_states::{Book, NewOrderSingle, Order, MAX_ORDERS};
 use nft_clob::sort_arr;
+use rand::Rng;
+use slice_rbtree::tree::{tree_size, RBTree, TreeParams};
 
 fn sort_arr_benchmark(c: &mut Criterion) {
-    c.bench_function("mod number", |b| {
+    c.bench_function("insert 2000 orders", |b| {
         b.iter(|| {
-            let price: u64 = 7461734;
-            for i in 1..31 {
-                let value = (price + i) % 30;
-                println!("VAL = {:?}", value);
+            let mut book = Book::new();
+            let maker = Pubkey::new_unique();
+            let mut rng = rand::thread_rng();
+            for i in 1..512 {
+                let nos = NewOrderSingle::new(true, rng.gen_range(1..150), 1);
+                book.new_limit(&nos, maker);
             }
+        })
+    });
+
+    let mut book = Book::new();
+    let maker = Pubkey::new_unique();
+    for i in 1..2000 {
+        let nos = NewOrderSingle::new(true, 6000 - i, 1);
+        book.new_limit(&nos, maker);
+    }
+
+    c.bench_function("remove order", |b| {
+        b.iter(|| {
+            book.bids.remove_order(872);
+        })
+    });
+
+    c.bench_function("rbtree: insert 2000 orders", |b| {
+        b.iter(|| {
+            let size = tree_size(
+                TreeParams {
+                    k_size: 8,
+                    v_size: size_of::<NewOrderSingle>(),
+                },
+                MAX_ORDERS as usize,
+            );
+
+            let mut buffer = vec![0; size];
+            const mem_size: usize = size_of::<NewOrderSingle>();
+            let mut rbtree: RBTree<u64, NewOrderSingle, 8, mem_size> =
+                RBTree::init_slice(&mut buffer).unwrap();
+            let maker = Pubkey::new_unique();
+
+            let mut rng = rand::thread_rng();
+            for i in 1..512 {
+                let nos = NewOrderSingle::new(true, rng.gen_range(1..150), 1);
+                rbtree.insert(i, nos).unwrap();
+            }
+        })
+    });
+
+
+    let size = tree_size(
+        TreeParams {
+            k_size: 8,
+            v_size: size_of::<NewOrderSingle>(),
+        },
+        MAX_ORDERS as usize,
+    );
+
+    let mut buffer = vec![0; size];
+    const MEM_SIZE: usize = size_of::<NewOrderSingle>();
+    let mut rbtree: RBTree<u64, NewOrderSingle, 8, MEM_SIZE> =
+        RBTree::init_slice(&mut buffer).unwrap();
+    let maker = Pubkey::new_unique();
+
+    let mut rng = rand::thread_rng();
+    for i in 1..512 {
+        let nos = NewOrderSingle::new(true, rng.gen_range(1..150), 1);
+        rbtree.insert(i, nos).unwrap();
+    }
+
+    c.bench_function("remove order", |b| {
+        b.iter(|| {
+            let val = 247;
+            rbtree.remove_entry(&val);
         })
     });
 

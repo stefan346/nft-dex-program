@@ -19,9 +19,13 @@ default = []
 anchor-lang = "0.27.0"
 anchor-spl = {version = "0.27.0",features = ["metadata"]}
 bytemuck = { version = "1.4.0", features = ["derive", "min_const_generics"]}
+slice-rbtree = "0.1.0"
+rand = "0.8.5"
 
 [dev-dependencies]
 criterion = "0.4.0"
+quickcheck = "1"
+quickcheck_macros = "1"
 
 [[bench]]
 name = "book_benchmark"
