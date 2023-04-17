@@ -37,20 +37,21 @@ impl Book {
                             .order
                             .execute_trade(&mut new_order);
 
+                        let next_pos = match self.asks.next_order(pos) {
+                            None => break,
+                            Some(next_pos) => next_pos,
+                        };
+
                         if self.asks.orders[pos as usize].order.is_filled() {
                             self.asks.remove_order(pos);
                             self.ask_min = self.asks.best_offer();
                         }
 
-                        pos = match self.asks.next_order(pos) {
-                            None => break,
-                            Some(next_pos) => next_pos,
-                        };
-
                         if new_order.is_filled() {
                             return; // new order is filled
                         }
-                        println!("1");
+
+                        pos = next_pos;
                     }
                 }
             }
@@ -71,19 +72,21 @@ impl Book {
                             .order
                             .execute_trade(&mut new_order);
 
+                        let next_pos = match self.bids.next_order(pos) {
+                            None => break, // No more orders
+                            Some(next_pos) => next_pos,
+                        };
+
                         if self.bids.orders[pos as usize].order.is_filled() {
                             self.bids.remove_order(pos);
                             self.bid_max = self.bids.best_offer();
                         }
 
-                        pos = match self.bids.next_order(pos) {
-                            None => break, // No more orders
-                            Some(next_pos) => next_pos,
-                        };
-
                         if new_order.is_filled() {
                             return; // filled
                         }
+
+                        pos = next_pos;
                     }
                 }
             }
@@ -249,13 +252,13 @@ mod test {
         let sell_nos_2 = NewOrderSingle::new(false, 10, 2);
         book.new_limit(&sell_nos_2, maker);
 
-        // assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 0);
-        // assert_eq!(book.bids.orders[0].order.get_cum_qty(), 0);
-        // assert_eq!(book.bids.orders[0].order.price, 0);
+        assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 0);
+        assert_eq!(book.bids.orders[0].order.get_cum_qty(), 0);
+        assert_eq!(book.bids.orders[0].order.price, 0);
 
-        // assert_eq!(book.bids.orders[1].order.get_leaves_qty(), 3);
-        // assert_eq!(book.bids.orders[1].order.get_cum_qty(), 1);
-        // assert_eq!(book.bids.orders[1].order.price, 10);
+        assert_eq!(book.bids.orders[1].order.get_leaves_qty(), 3);
+        assert_eq!(book.bids.orders[1].order.get_cum_qty(), 1);
+        assert_eq!(book.bids.orders[1].order.price, 10);
 
         println!(
             "Book bids: {:?} {:?} {:?}",
