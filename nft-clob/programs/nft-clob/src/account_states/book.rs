@@ -25,74 +25,61 @@ impl Book {
     /// Process an incoming new order single.
     pub fn new_limit(&mut self, nos: &NewOrderSingle, maker: Pubkey) {
         let mut new_order = nos.into_order(maker);
-        if nos.is_buy {
-            if nos.limit >= self.ask_min {
-                if !self.asks.is_empty() {
-                    let mut pos = self.asks.head;
-                    loop {
-                        if self.asks.orders[pos as usize].order.price > nos.limit {
-                            break; // new order outside price range
-                        }
-                        self.asks.orders[pos as usize]
-                            .order
-                            .execute_trade(&mut new_order);
 
-                        let next_pos = match self.asks.next_order(pos) {
-                            None => break,
-                            Some(next_pos) => next_pos,
-                        };
+        let is_match = match nos.is_buy {
+            true => |order_price: u64, nos_limit: u64| -> bool { order_price <= nos_limit },
+            false => |order_price: u64, nos_limit: u64| -> bool { order_price >= nos_limit },
+        };
 
-                        if self.asks.orders[pos as usize].order.is_filled() {
-                            self.asks.remove_order(pos);
-                            self.ask_min = self.asks.best_offer();
-                        }
+        let (match_side, has_matches) = match nos.is_buy {
+            true => (&mut self.asks, nos.limit >= self.ask_min),
+            false => (&mut self.bids, nos.limit <= self.bid_max),
+        };
 
-                        if new_order.is_filled() {
-                            return; // new order is filled
-                        }
-
-                        pos = next_pos;
+        if !match_side.is_empty() {
+            if has_matches {
+                let mut pos = match_side.head;
+                loop {
+                    if !is_match(match_side.orders[pos as usize].order.price, nos.limit) {
+                        break; // new order outside price range
                     }
+                    match_side.orders[pos as usize]
+                        .order
+                        .execute_trade(&mut new_order);
+
+                    let next_pos = match_side.next_order(pos);
+
+                    if match_side.orders[pos as usize].order.is_filled() {
+                        match_side.remove_order(pos);
+                        match nos.is_buy {
+                            true => self.ask_min = match_side.best_offer(),
+                            false => self.bid_max = match_side.best_offer(),
+                        };
+                    }
+
+                    if new_order.is_filled() {
+                        return; // new order is filled
+                    }
+
+                    pos = match next_pos {
+                        None => break,
+                        Some(next_pos) => next_pos,
+                    };
                 }
             }
-            self.bids.insert_order(new_order, nos.is_buy);
-            if nos.limit > self.bid_max {
-                self.bid_max = nos.limit;
-            }
-        } else {
-            if nos.limit <= self.bid_max {
-                if !self.bids.is_empty() {
-                    let mut pos = self.bids.head;
-                    loop {
-                        if self.bids.orders[pos as usize].order.price < nos.limit {
-                            break; // outside price range
-                        }
-
-                        self.bids.orders[pos as usize]
-                            .order
-                            .execute_trade(&mut new_order);
-
-                        let next_pos = match self.bids.next_order(pos) {
-                            None => break, // No more orders
-                            Some(next_pos) => next_pos,
-                        };
-
-                        if self.bids.orders[pos as usize].order.is_filled() {
-                            self.bids.remove_order(pos);
-                            self.bid_max = self.bids.best_offer();
-                        }
-
-                        if new_order.is_filled() {
-                            return; // filled
-                        }
-
-                        pos = next_pos;
-                    }
+        }
+        match nos.is_buy {
+            true => {
+                self.bids.insert_order(new_order, nos.is_buy);
+                if nos.limit > self.bid_max {
+                    self.bid_max = nos.limit;
                 }
             }
-            self.asks.insert_order(new_order, nos.is_buy);
-            if self.ask_min == 0 || nos.limit < self.ask_min {
-                self.ask_min = nos.limit;
+            false => {
+                self.asks.insert_order(new_order, nos.is_buy);
+                if self.ask_min == 0 || nos.limit < self.ask_min {
+                    self.ask_min = nos.limit;
+                }
             }
         }
     }
@@ -130,6 +117,7 @@ mod test {
 
     use super::{Book, NewOrderSingle, Side, MAX_ORDERS};
     use anchor_lang::prelude::Pubkey;
+    use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
 
     #[test]
@@ -259,19 +247,146 @@ mod test {
         assert_eq!(book.bids.orders[1].order.get_leaves_qty(), 3);
         assert_eq!(book.bids.orders[1].order.get_cum_qty(), 1);
         assert_eq!(book.bids.orders[1].order.price, 10);
+    }
+
+    #[test]
+    fn it_should_place_a_few_orders_1() {
+        let mut book = Book::new();
+
+        let maker = Pubkey::new_unique();
+
+        let buy_nos_1 = NewOrderSingle::new(true, 182 as u64, 123);
+        let buy_nos_2 = NewOrderSingle::new(true, 255 as u64, 184);
+        let sell_nos_1 = NewOrderSingle::new(false, 23, 33);
+        let sell_nos_2 = NewOrderSingle::new(false, 189, 31);
+
+        book.new_limit(&buy_nos_1, maker);
+        book.new_limit(&sell_nos_1, maker);
+        book.new_limit(&buy_nos_2, maker);
+        book.new_limit(&sell_nos_2, maker);
+
+        assert_eq!(book.bids.tail, 0);
+        assert_eq!(book.bids.head, 1);
+        assert_eq!(book.bids.orders[0].order.price, 182);
+        assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 90);
+        assert_eq!(book.bids.orders[1].order.price, 255);
+        assert_eq!(book.bids.orders[1].order.get_leaves_qty(), 153);
+    }
+
+    #[test]
+    fn it_should_place_a_few_orders_2() {
+        let mut book = Book::new();
+
+        let maker = Pubkey::new_unique();
+        let mut buy_orders = [(12, 216), (179, 98)].to_vec();
+        let mut sell_orders = [(22, 100), (51, 147)].to_vec();
+
+        loop {
+            let (price, size) = buy_orders.remove(0);
+            println!("price {}", price);
+            let buy_nos = NewOrderSingle::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker);
+
+            let (price, size) = sell_orders.remove(0);
+            let sell_nos = NewOrderSingle::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker);
+
+            if buy_orders.len() == 0 && sell_orders.len() == 0 {
+                break;
+            }
+        }
+
+        assert_eq!(book.bids.tail, 0);
+        assert_eq!(book.bids.head, 0);
+        assert_eq!(book.bids.orders[0].order.price, 12);
+        assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 216);
+
+        assert_eq!(book.asks.tail, 1);
+        assert_eq!(book.asks.head, 0);
+        assert_eq!(book.asks.orders[0].order.price, 22);
+        assert_eq!(book.asks.orders[0].order.get_leaves_qty(), 2);
+        assert_eq!(book.asks.orders[1].order.price, 51);
+        assert_eq!(book.asks.orders[1].order.get_leaves_qty(), 147);
+    }
+
+    #[test]
+    fn it_should_place_a_few_orders_3() {
+        let mut book = Book::new();
+
+        let maker = Pubkey::new_unique();
+        let mut buy_orders = [(255, 95), (197, 236)].to_vec();
+        let mut sell_orders = [(199, 196), (91, 3)].to_vec();
+
+        loop {
+            let (price, size) = buy_orders.remove(0);
+            println!("price {}", price);
+            let buy_nos = NewOrderSingle::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker);
+
+            let (price, size) = sell_orders.remove(0);
+            let sell_nos = NewOrderSingle::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker);
+
+            if buy_orders.len() == 0 && sell_orders.len() == 0 {
+                break;
+            }
+        }
+
+        assert_eq!(book.bids.tail, 0);
+        assert_eq!(book.bids.head, 0);
+        assert_eq!(book.bids.orders[0].order.price, 197);
+        assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 233);
+
+        assert_eq!(book.asks.tail, 0);
+        assert_eq!(book.asks.head, 0);
+        assert_eq!(book.asks.orders[0].order.price, 199);
+        assert_eq!(book.asks.orders[0].order.get_leaves_qty(), 101);
+    }
+
+    #[test]
+    fn it_should_place_a_few_orders_4() {
+        let mut book = Book::new();
+
+        let maker = Pubkey::new_unique();
+        let mut buy_orders = [(226, 135), (183, 46)].to_vec();
+        let mut sell_orders = [(38, 157), (1, 148)].to_vec();
+
+        loop {
+            let (price, size) = buy_orders.remove(0);
+            println!("price {}", price);
+            let buy_nos = NewOrderSingle::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker);
+
+            let (price, size) = sell_orders.remove(0);
+            let sell_nos = NewOrderSingle::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker);
+
+            if buy_orders.len() == 0 && sell_orders.len() == 0 {
+                break;
+            }
+        }
+
+        assert_eq!(book.bids.tail, 0);
+        assert_eq!(book.bids.head, 0);
+        assert_eq!(book.bids.orders[0].order.price, 0);
+        assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 0);
+
+        assert_eq!(book.asks.tail, 0);
+        assert_eq!(book.asks.head, 0);
+        assert_eq!(book.asks.orders[0].order.price, 1);
+        assert_eq!(book.asks.orders[0].order.get_leaves_qty(), 124);
 
         println!(
-            "Book bids: {:?} {:?} {:?}",
+            "{:?},{:?},{:?}",
             book.bids.orders[0], book.bids.orders[1], book.bids.orders[2]
-        );
-        println!(
-            "Book asks: {:?} {:?} {:?}",
-            book.asks.orders[0], book.asks.orders[1], book.asks.orders[2]
         );
     }
 
     #[quickcheck]
-    fn it_should_match_many_orders(mut buy: Vec<(u64, u64)>, mut sell: Vec<(u64, u64)>) -> bool {
+    fn it_should_match_many_orders(
+        mut buy: Vec<(u64, u64)>,
+        mut sell: Vec<(u64, u64)>,
+    ) -> TestResult {
         buy = buy
             .into_iter()
             .filter(|(x, y)| *x != 0 && *y != 0)
@@ -280,24 +395,29 @@ mod test {
             .into_iter()
             .filter(|(x, y)| *x != 0 && *y != 0)
             .collect();
-        println!("buy {}, sell {}", buy.len(), sell.len());
+        if buy.len() < 5 || sell.len() < 5 {
+            return TestResult::discard();
+        }
+
         let mut book = Book::new();
         let mut clone_buy = buy.clone();
         let mut clone_sell = sell.clone();
 
-        let mut sort_buy: Vec<(u64, u64)> = Vec::new();
-        let mut sort_sell: Vec<(u64, u64)> = Vec::new();
-
+        let mut sort_buy: Vec<(u64, u64, u8)> = Vec::new();
+        let mut sort_sell: Vec<(u64, u64, u8)> = Vec::new();
+        let mut sort_buy_rank = 0;
+        let mut sort_sell_rank = 0;
         loop {
-            if let Some((bid_price, mut bid_size)) = clone_buy.pop() {
-                for (ask_price, mut ask_size) in sort_sell.iter_mut() {
+            if clone_buy.len() > 0 {
+                let (bid_price, mut bid_size) = clone_buy.remove(0);
+                for (ask_price, ask_size, _) in &mut sort_sell.iter_mut() {
                     if bid_price >= *ask_price {
-                        if ask_size >= bid_size {
-                            ask_size -= bid_size;
+                        if *ask_size >= bid_size {
+                            *ask_size -= bid_size;
                             bid_size = 0;
                         } else {
-                            bid_size -= ask_size;
-                            ask_size = 0;
+                            bid_size -= *ask_size;
+                            *ask_size = 0;
                         }
                     } else {
                         break;
@@ -306,19 +426,22 @@ mod test {
                         break;
                     }
                 }
-                sort_buy.push((bid_price, bid_size));
+                sort_buy.push((bid_price, bid_size, sort_buy_rank));
+                sort_buy_rank += 1;
                 // Order sort_buy descending
-                sort_buy.sort_by(|(ax, bx), (ay, by)| ay.cmp(ax));
+                sort_buy.sort_by(
+                    |(ax, bx, cx), (ay, by, cy)| if ax == ay { cx.cmp(cy) } else { ay.cmp(ax) },
+                );
             }
-
-            if let Some((ask_price, mut ask_size)) = clone_sell.pop() {
-                for (bid_price, mut bid_size) in sort_buy.iter_mut() {
+            if clone_sell.len() > 0 {
+                let (ask_price, mut ask_size) = clone_sell.remove(0);
+                for (bid_price, bid_size, _) in &mut sort_buy.iter_mut() {
                     if ask_price <= *bid_price {
-                        if ask_size >= bid_size {
-                            ask_size -= bid_size;
-                            bid_size = 0;
+                        if ask_size >= *bid_size {
+                            ask_size -= *bid_size;
+                            *bid_size = 0;
                         } else {
-                            bid_size -= ask_size;
+                            *bid_size -= ask_size;
                             ask_size = 0;
                         }
                     } else {
@@ -328,9 +451,12 @@ mod test {
                         break;
                     }
                 }
-                sort_sell.push((ask_price, ask_size));
+                sort_sell.push((ask_price, ask_size, sort_sell_rank));
+                sort_sell_rank += 1;
                 // sort ascending
-                sort_buy.sort_by(|(ax, bx), (ay, by)| ax.cmp(ay));
+                sort_sell.sort_by(
+                    |(ax, bx, cx), (ay, by, cy)| if ax == ay { cx.cmp(cy) } else { ax.cmp(ay) },
+                );
             }
 
             if clone_buy.len() == 0 && clone_sell.len() == 0 {
@@ -339,12 +465,14 @@ mod test {
         }
 
         loop {
-            if let Some((bid_price, bid_size)) = buy.pop() {
+            if buy.len() > 0 {
+                let (bid_price, bid_size) = buy.remove(0);
                 let buy_nos = NewOrderSingle::new(true, bid_price, bid_size);
                 book.new_limit(&buy_nos, Pubkey::new_unique());
             }
-            if let Some((asks_price, ask_size)) = sell.pop() {
-                let buy_nos = NewOrderSingle::new(true, asks_price, ask_size);
+            if sell.len() > 0 {
+                let (asks_price, ask_size) = sell.remove(0);
+                let buy_nos = NewOrderSingle::new(false, asks_price, ask_size);
                 book.new_limit(&buy_nos, Pubkey::new_unique());
             }
 
@@ -352,31 +480,39 @@ mod test {
                 break;
             }
         }
-        let mut len = 0;
-        let mut cur_bid_pos = book.bids.head;
-        loop {
-            let order = book.bids.orders[cur_bid_pos as usize];
-            if order.order.is_tombstone() {
-                break;
-            }
-            len += 1;
-            cur_bid_pos = order.next;
 
-            if book.bids.tail == cur_bid_pos {
-                break;
-            }
+        sort_buy = sort_buy
+            .into_iter()
+            .filter(|(_, size, _)| *size != 0)
+            .collect();
+
+        sort_sell = sort_sell
+            .into_iter()
+            .filter(|(_, size, _)| *size != 0)
+            .collect();
+        let mut p = -1;
+        let mut s = -1;
+        if sort_buy.len() > 0 {
+            let (a, b, _) = sort_buy[0];
+            p = a as i128;
+            s = b as i128;
         }
 
-        println!("len {} - {}", len, sort_buy.len());
+        let mut cur_bid_pos = book.bids.head;
+        for (price, size, _) in sort_buy.clone() {
+            let order = book.bids.orders[cur_bid_pos as usize];
+            assert_eq!(order.order.price, price);
+            assert_eq!(order.order.get_leaves_qty(), size);
+            cur_bid_pos = order.next;
+        }
 
-        // sort_buy = sort_buy.into_iter().filter(|(_, size)| *size != 0).collect();
-        // let mut cur_bid_pos = book.bids.head;
-        // for (price, size) in sort_buy {
-        //     let order = book.bids.orders[cur_bid_pos as usize];
-        //     assert_eq!(order.order.price, price);
-        //     cur_bid_pos = order.next;
-        // }
-
-        true
+        let mut cur_ask_pos = book.asks.head;
+        for (price, size, _) in sort_sell {
+            let order = book.asks.orders[cur_ask_pos as usize];
+            assert_eq!(order.order.price, price);
+            assert_eq!(order.order.get_leaves_qty(), size);
+            cur_ask_pos = order.next;
+        }
+        TestResult::passed()
     }
 }

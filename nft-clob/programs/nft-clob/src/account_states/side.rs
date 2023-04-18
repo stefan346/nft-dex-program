@@ -69,7 +69,7 @@ impl Side {
     /// Gets the next order index if exists.
     pub fn next_order(&mut self, pos: u16) -> Option<u16> {
         let next = self.orders[pos as usize].next;
-        if self.orders[next as usize].order.is_tombstone() {
+        if self.orders[next as usize].order.is_tombstone() || pos == next {
             return None;
         }
         Some(next)
