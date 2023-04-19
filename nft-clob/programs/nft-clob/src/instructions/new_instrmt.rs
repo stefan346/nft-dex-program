@@ -22,8 +22,14 @@ pub struct NewInstrmtCtx<'info> {
     )]
     pub instrmt_grp: Box<Account<'info, InstrmtGrp>>,
 
-    #[account(zero)]
-    pub instrmt: AccountLoader<'info, Instrmt>,
+    #[account(
+        init,
+        seeds = [b"instrmt", book.key()],
+        payer = authority,
+        bump,
+        space = Instrmt::space()
+    )]
+    pub instrmt: Box<Account<'info, Instrmt>>,
 
     #[account(zero)]
     pub book: AccountLoader<'info, Book>,
@@ -84,7 +90,7 @@ pub fn handler(ctx: Context<NewInstrmtCtx>, ix: NewInstrmtIx) -> Result<()> {
 
     book.ask_min = 0;
     book.bid_max = 0;
-    
+
     book.asks.head = 0;
     book.asks.tail = 0;
 
