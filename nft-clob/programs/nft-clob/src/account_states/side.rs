@@ -11,6 +11,7 @@ pub struct Side {
     padding: [u8; 10],
 }
 
+#[cfg(test)]
 impl Side {
     pub fn new() -> Self {
         Self {
@@ -21,7 +22,9 @@ impl Side {
             padding: [0; 10],
         }
     }
+}
 
+impl Side {
     pub fn get_tombstone(&self) -> u16 {
         self.tombstone
     }

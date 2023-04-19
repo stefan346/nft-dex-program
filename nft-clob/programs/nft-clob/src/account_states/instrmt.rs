@@ -15,7 +15,7 @@ pub struct Instrmt {
     pub padding: [u8; 6],
 }
 
-#[account(zero_copy)]
+#[zero_copy]
 pub struct InstrmtBumps {
     pub base_vault_bump: u8,
     pub quote_vault_bump: u8,

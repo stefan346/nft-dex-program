@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 
-use super::{Order, Side};
+use crate::{instructions::new_order_single::NewOrderSingleIx, enums::OrderType};
+
+use super::{Order, Side, RingBufferFilledExecReport};
 
 pub const MAX_ORDERS: u16 = 2000;
 
@@ -13,6 +15,7 @@ pub struct Book {
     pub bids: Side,   // Bid side
 }
 
+#[cfg(test)]
 impl Book {
     pub fn new() -> Self {
         Book {
@@ -22,8 +25,11 @@ impl Book {
             bids: Side::new(),
         }
     }
+}
+
+impl Book {
     /// Process an incoming new order single.
-    pub fn new_limit(&mut self, nos: &NewOrderSingle, maker: Pubkey) {
+    pub fn new_limit(&mut self, nos: &NewOrderSingleIx, maker: Pubkey, rb_filled_exec_report: &mut RingBufferFilledExecReport) -> Order {
         let mut new_order = nos.into_order(maker);
 
         let is_match = match nos.is_buy {
@@ -43,9 +49,10 @@ impl Book {
                     if !is_match(match_side.orders[pos as usize].order.price, nos.limit) {
                         break; // new order outside price range
                     }
-                    match_side.orders[pos as usize]
+                    let filled_exec_report = match_side.orders[pos as usize]
                         .order
-                        .execute_trade(&mut new_order);
+                        .execute_trade(&mut new_order, nos.is_buy).unwrap();
+                    rb_filled_exec_report.insert(filled_exec_report);
 
                     let next_pos = match_side.next_order(pos);
 
@@ -58,7 +65,7 @@ impl Book {
                     }
 
                     if new_order.is_filled() {
-                        return; // new order is filled
+                        return new_order; // new order is filled
                     }
 
                     pos = match next_pos {
@@ -68,6 +75,11 @@ impl Book {
                 }
             }
         }
+
+        if nos.order_type == OrderType::IOC {
+            return new_order;
+        }
+
         match nos.is_buy {
             true => {
                 self.bids.insert_order(new_order, nos.is_buy);
@@ -82,28 +94,17 @@ impl Book {
                 }
             }
         }
+        return new_order;
     }
 }
 
-impl Book {
-    pub fn space(bids_size: usize) -> usize {
-        8
-    }
-}
-
-#[derive(AnchorDeserialize, AnchorSerialize)]
-pub struct NewOrderSingle {
-    pub is_buy: bool,
-    pub limit: u64,
-    pub size: u64,
-}
-
-impl NewOrderSingle {
+impl NewOrderSingleIx {
     pub fn new(is_buy: bool, limit: u64, size: u64) -> Self {
-        NewOrderSingle {
+        NewOrderSingleIx {
             is_buy,
             limit,
             size,
+            order_type: crate::enums::OrderType::GTC,
         }
     }
     pub fn into_order(&self, maker: Pubkey) -> Order {
@@ -113,9 +114,10 @@ impl NewOrderSingle {
 
 #[cfg(test)]
 mod test {
-    use std::mem::{self, size_of};
 
-    use super::{Book, NewOrderSingle, Side, MAX_ORDERS};
+    use crate::account_states::RingBufferFilledExecReport;
+
+    use super::{Book, NewOrderSingleIx, MAX_ORDERS};
     use anchor_lang::prelude::Pubkey;
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
@@ -123,15 +125,15 @@ mod test {
     #[test]
     fn it_should_add_single_order_to_both_sides() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let sell_maker = Pubkey::new_unique();
         let buy_maker = Pubkey::new_unique();
 
-        let sell_nos = NewOrderSingle::new(false, 10, 3);
-        let buy_nos = NewOrderSingle::new(true, 9, 2);
+        let sell_nos = NewOrderSingleIx::new(false, 10, 3);
+        let buy_nos = NewOrderSingleIx::new(true, 9, 2);
 
-        book.new_limit(&sell_nos, sell_maker);
-        book.new_limit(&buy_nos, buy_maker);
+        book.new_limit(&sell_nos, sell_maker, &mut rb);
+        book.new_limit(&buy_nos, buy_maker, &mut rb);
 
         assert_eq!(book.ask_min, 10);
         assert_eq!(book.asks.orders[0].order.price, 10);
@@ -149,15 +151,15 @@ mod test {
     #[quickcheck]
     fn it_should_add_many_orders_to_asks_side(mut sell_limits: Vec<u64>) -> bool {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let size = 2;
         for i in sell_limits.iter() {
             if *i == 0 {
                 continue;
             }
-            let sell_nos = NewOrderSingle::new(false, i.clone(), size);
-            book.new_limit(&sell_nos, maker);
+            let sell_nos = NewOrderSingleIx::new(false, i.clone(), size);
+            book.new_limit(&sell_nos, maker, &mut rb);
         }
 
         sell_limits.sort();
@@ -176,14 +178,14 @@ mod test {
     #[test]
     fn it_should_add_many_orders_to_bids_side() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let size = 2;
 
         let mut buy_limits = [10, 11, 12, 13, 14, 15, 16, 9, 25, 12, 8, 7, 8, 6, 6, 19];
         for i in buy_limits {
-            let buy_nos = NewOrderSingle::new(true, i, size);
-            book.new_limit(&buy_nos, maker);
+            let buy_nos = NewOrderSingleIx::new(true, i, size);
+            book.new_limit(&buy_nos, maker, &mut rb);
         }
 
         buy_limits.sort_by(|a, b| b.cmp(a));
@@ -197,34 +199,34 @@ mod test {
     #[test]
     fn it_should_add_many_orders_with_incremental_price() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let size = 2;
 
         for i in 1..MAX_ORDERS {
-            let buy_nos = NewOrderSingle::new(true, i as u64, size);
-            book.new_limit(&buy_nos, maker);
+            let buy_nos = NewOrderSingleIx::new(true, i as u64, size);
+            book.new_limit(&buy_nos, maker, &mut rb);
         }
 
         for i in 1..MAX_ORDERS {
-            let sell_nos = NewOrderSingle::new(false, i as u64, size);
-            book.new_limit(&sell_nos, maker);
+            let sell_nos = NewOrderSingleIx::new(false, i as u64, size);
+            book.new_limit(&sell_nos, maker, &mut rb);
         }
     }
 
     #[test]
     fn it_should_match_a_few_orders() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
 
-        let buy_nos_1 = NewOrderSingle::new(true, 11 as u64, 2);
-        book.new_limit(&buy_nos_1, maker);
-        let buy_nos_2 = NewOrderSingle::new(true, 10 as u64, 4);
-        book.new_limit(&buy_nos_2, maker);
+        let buy_nos_1 = NewOrderSingleIx::new(true, 11 as u64, 2);
+        book.new_limit(&buy_nos_1, maker, &mut rb);
+        let buy_nos_2 = NewOrderSingleIx::new(true, 10 as u64, 4);
+        book.new_limit(&buy_nos_2, maker, &mut rb);
 
-        let sell_nos_1 = NewOrderSingle::new(false, 10, 1);
-        book.new_limit(&sell_nos_1, maker);
+        let sell_nos_1 = NewOrderSingleIx::new(false, 10, 1);
+        book.new_limit(&sell_nos_1, maker, &mut rb);
 
         assert_eq!(book.asks.orders[0].order.get_leaves_qty(), 0);
         assert_eq!(book.asks.orders[0].order.get_cum_qty(), 0);
@@ -237,8 +239,8 @@ mod test {
         assert_eq!(book.bids.orders[1].order.get_cum_qty(), 0);
         assert_eq!(book.bids.orders[1].order.price, 10);
 
-        let sell_nos_2 = NewOrderSingle::new(false, 10, 2);
-        book.new_limit(&sell_nos_2, maker);
+        let sell_nos_2 = NewOrderSingleIx::new(false, 10, 2);
+        book.new_limit(&sell_nos_2, maker, &mut rb);
 
         assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 0);
         assert_eq!(book.bids.orders[0].order.get_cum_qty(), 0);
@@ -252,18 +254,18 @@ mod test {
     #[test]
     fn it_should_place_a_few_orders_1() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
 
-        let buy_nos_1 = NewOrderSingle::new(true, 182 as u64, 123);
-        let buy_nos_2 = NewOrderSingle::new(true, 255 as u64, 184);
-        let sell_nos_1 = NewOrderSingle::new(false, 23, 33);
-        let sell_nos_2 = NewOrderSingle::new(false, 189, 31);
+        let buy_nos_1 = NewOrderSingleIx::new(true, 182 as u64, 123);
+        let buy_nos_2 = NewOrderSingleIx::new(true, 255 as u64, 184);
+        let sell_nos_1 = NewOrderSingleIx::new(false, 23, 33);
+        let sell_nos_2 = NewOrderSingleIx::new(false, 189, 31);
 
-        book.new_limit(&buy_nos_1, maker);
-        book.new_limit(&sell_nos_1, maker);
-        book.new_limit(&buy_nos_2, maker);
-        book.new_limit(&sell_nos_2, maker);
+        book.new_limit(&buy_nos_1, maker, &mut rb);
+        book.new_limit(&sell_nos_1, maker, &mut rb);
+        book.new_limit(&buy_nos_2, maker, &mut rb);
+        book.new_limit(&sell_nos_2, maker, &mut rb);
 
         assert_eq!(book.bids.tail, 0);
         assert_eq!(book.bids.head, 1);
@@ -276,7 +278,7 @@ mod test {
     #[test]
     fn it_should_place_a_few_orders_2() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let mut buy_orders = [(12, 216), (179, 98)].to_vec();
         let mut sell_orders = [(22, 100), (51, 147)].to_vec();
@@ -284,12 +286,12 @@ mod test {
         loop {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
-            let buy_nos = NewOrderSingle::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker);
+            let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker, &mut rb);
 
             let (price, size) = sell_orders.remove(0);
-            let sell_nos = NewOrderSingle::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker);
+            let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker, &mut rb);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -312,7 +314,7 @@ mod test {
     #[test]
     fn it_should_place_a_few_orders_3() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let mut buy_orders = [(255, 95), (197, 236)].to_vec();
         let mut sell_orders = [(199, 196), (91, 3)].to_vec();
@@ -320,12 +322,12 @@ mod test {
         loop {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
-            let buy_nos = NewOrderSingle::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker);
+            let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker, &mut rb);
 
             let (price, size) = sell_orders.remove(0);
-            let sell_nos = NewOrderSingle::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker);
+            let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker, &mut rb);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -346,7 +348,7 @@ mod test {
     #[test]
     fn it_should_place_a_few_orders_4() {
         let mut book = Book::new();
-
+        let mut rb = RingBufferFilledExecReport::new();
         let maker = Pubkey::new_unique();
         let mut buy_orders = [(226, 135), (183, 46)].to_vec();
         let mut sell_orders = [(38, 157), (1, 148)].to_vec();
@@ -354,12 +356,12 @@ mod test {
         loop {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
-            let buy_nos = NewOrderSingle::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker);
+            let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
+            book.new_limit(&buy_nos, maker, &mut rb);
 
             let (price, size) = sell_orders.remove(0);
-            let sell_nos = NewOrderSingle::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker);
+            let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
+            book.new_limit(&sell_nos, maker, &mut rb);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -384,8 +386,8 @@ mod test {
 
     #[quickcheck]
     fn it_should_match_many_orders(
-        mut buy: Vec<(u64, u64)>,
-        mut sell: Vec<(u64, u64)>,
+        mut buy: Vec<(u16, u32)>,
+        mut sell: Vec<(u16, u32)>,
     ) -> TestResult {
         buy = buy
             .into_iter()
@@ -395,16 +397,14 @@ mod test {
             .into_iter()
             .filter(|(x, y)| *x != 0 && *y != 0)
             .collect();
-        if buy.len() < 5 || sell.len() < 5 {
-            return TestResult::discard();
-        }
 
         let mut book = Book::new();
+        let mut rb = RingBufferFilledExecReport::new();
         let mut clone_buy = buy.clone();
         let mut clone_sell = sell.clone();
 
-        let mut sort_buy: Vec<(u64, u64, u8)> = Vec::new();
-        let mut sort_sell: Vec<(u64, u64, u8)> = Vec::new();
+        let mut sort_buy: Vec<(u16, u32, u8)> = Vec::new();
+        let mut sort_sell: Vec<(u16, u32, u8)> = Vec::new();
         let mut sort_buy_rank = 0;
         let mut sort_sell_rank = 0;
         loop {
@@ -430,7 +430,7 @@ mod test {
                 sort_buy_rank += 1;
                 // Order sort_buy descending
                 sort_buy.sort_by(
-                    |(ax, bx, cx), (ay, by, cy)| if ax == ay { cx.cmp(cy) } else { ay.cmp(ax) },
+                    |(ax, _, cx), (ay, _, cy)| if ax == ay { cx.cmp(cy) } else { ay.cmp(ax) },
                 );
             }
             if clone_sell.len() > 0 {
@@ -455,7 +455,7 @@ mod test {
                 sort_sell_rank += 1;
                 // sort ascending
                 sort_sell.sort_by(
-                    |(ax, bx, cx), (ay, by, cy)| if ax == ay { cx.cmp(cy) } else { ax.cmp(ay) },
+                    |(ax, _, cx), (ay, _, cy)| if ax == ay { cx.cmp(cy) } else { ax.cmp(ay) },
                 );
             }
 
@@ -467,13 +467,13 @@ mod test {
         loop {
             if buy.len() > 0 {
                 let (bid_price, bid_size) = buy.remove(0);
-                let buy_nos = NewOrderSingle::new(true, bid_price, bid_size);
-                book.new_limit(&buy_nos, Pubkey::new_unique());
+                let buy_nos = NewOrderSingleIx::new(true, bid_price as u64, bid_size as u64);
+                book.new_limit(&buy_nos, Pubkey::new_unique(), &mut rb);
             }
             if sell.len() > 0 {
                 let (asks_price, ask_size) = sell.remove(0);
-                let buy_nos = NewOrderSingle::new(false, asks_price, ask_size);
-                book.new_limit(&buy_nos, Pubkey::new_unique());
+                let buy_nos = NewOrderSingleIx::new(false, asks_price as u64, ask_size as u64);
+                book.new_limit(&buy_nos, Pubkey::new_unique(), &mut rb);
             }
 
             if buy.len() == 0 && sell.len() == 0 {
@@ -490,27 +490,20 @@ mod test {
             .into_iter()
             .filter(|(_, size, _)| *size != 0)
             .collect();
-        let mut p = -1;
-        let mut s = -1;
-        if sort_buy.len() > 0 {
-            let (a, b, _) = sort_buy[0];
-            p = a as i128;
-            s = b as i128;
-        }
 
         let mut cur_bid_pos = book.bids.head;
         for (price, size, _) in sort_buy.clone() {
             let order = book.bids.orders[cur_bid_pos as usize];
-            assert_eq!(order.order.price, price);
-            assert_eq!(order.order.get_leaves_qty(), size);
+            assert_eq!(order.order.price, price as u64);
+            assert_eq!(order.order.get_leaves_qty(), size as u64);
             cur_bid_pos = order.next;
         }
 
         let mut cur_ask_pos = book.asks.head;
         for (price, size, _) in sort_sell {
             let order = book.asks.orders[cur_ask_pos as usize];
-            assert_eq!(order.order.price, price);
-            assert_eq!(order.order.get_leaves_qty(), size);
+            assert_eq!(order.order.price, price as u64);
+            assert_eq!(order.order.get_leaves_qty(), size as u64);
             cur_ask_pos = order.next;
         }
         TestResult::passed()
