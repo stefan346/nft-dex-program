@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::enums::Side;
-
-const REPORT_SIZE: u8 = 2;
+const REPORT_SIZE: u8 = 200;
 
 // Ring Buffer Filled Execution Report
 #[zero_copy]
@@ -19,7 +17,7 @@ impl RingBufferFilledExecReport {
     }
 
     pub fn space() -> usize {
-        1 + (4 + REPORT_SIZE as usize * FilledExecReport::space())
+        REPORT_SIZE as usize * FilledExecReport::space() + 1 + 7
     }
 }
 
@@ -38,6 +36,6 @@ pub struct FilledExecReport {
 
 impl FilledExecReport {
     pub fn space() -> usize {
-        1 + 32 * 2 + 8 * 4
+        32 * 2 + 8 * 4 + 1 + 7
     }
 }
