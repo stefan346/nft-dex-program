@@ -29,7 +29,8 @@ impl Crank {
     pub fn new_empty() -> Self {
         Self {
             maker: Pubkey::default(),
-            mint: Pubkey::default(),
+            vault: Pubkey::default(),
+            token_account: Pubkey::default(),
             quantity: 0,
         }
     }
@@ -38,8 +39,8 @@ impl Crank {
 impl RingBufferCrank {
     pub fn insert(
         &mut self,
-        base_mint: Pubkey,
-        quote_mint: Pubkey,
+        vault: Pubkey,
+        token_account: Pubkey,
         is_buy: bool,
         maker: Pubkey,
         quantity: u64,
@@ -48,23 +49,26 @@ impl RingBufferCrank {
         if self.head == self.next {
             panic!("rb-crank filled up. Crank faster to accept new orders!");
         }
-        
+
         let crank = match is_buy {
-            true => {
-                Crank::new(maker, quote_mint, quantity.checked_add(price).unwrap())
-            },
-            false => {
-                Crank::new(maker, base_mint, quantity)
-            }
+            true => Crank::new(
+                maker,
+                vault,
+                token_account,
+                quantity.checked_add(price).unwrap(),
+            ),
+            false => Crank::new(maker, vault, token_account, quantity),
         };
 
         self.cranks[self.next as usize] = crank;
         self.next = (self.next + 1) % CRANK_SIZE
     }
 
-    pub fn remove_head(&mut self) {
+    pub fn remove_head(&mut self) -> Crank {
+        let head = self.cranks[self.head as usize].clone();
         self.cranks[self.head as usize].clear();
         self.head = (self.head + 1) & CRANK_SIZE;
+        head
     }
 
     pub fn space() -> usize {
@@ -74,23 +78,45 @@ impl RingBufferCrank {
 
 #[zero_copy]
 pub struct Crank {
-    pub maker: Pubkey, // Maker.
-    pub mint: Pubkey,  // Mint to transfer to maker.
-    pub quantity: u64, // Total quantity filled.
+    maker: Pubkey,         // Maker.
+    vault: Pubkey,         // Mint to transfer to maker.
+    token_account: Pubkey, // Mint to transfer to maker.
+    quantity: u64,         // Total quantity filled.
 }
 
 impl Crank {
-    pub fn new(maker: Pubkey, mint: Pubkey, quantity: u64) -> Self {
+    pub fn new(maker: Pubkey, vault: Pubkey, token_account: Pubkey, quantity: u64) -> Self {
         Self {
             maker,
-            mint,
+            vault,
             quantity,
+            token_account,
         }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.quantity == 0
+    }
+
+    pub fn get_maker(&self) -> Pubkey {
+        self.maker
+    }
+
+    pub fn get_token_account(&self) -> Pubkey {
+        self.token_account
+    }
+
+    pub fn get_vault(&self) -> Pubkey {
+        self.vault
+    }
+
+    pub fn get_quantity(&self) -> u64 {
+        self.quantity
     }
 
     pub fn clear(&mut self) {
         self.maker = Pubkey::default();
-        self.mint = Pubkey::default();
+        self.vault = Pubkey::default();
+        self.token_account = Pubkey::default();
         self.quantity = 0;
     }
 

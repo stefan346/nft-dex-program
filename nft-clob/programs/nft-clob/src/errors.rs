@@ -10,4 +10,10 @@ pub enum ErrorCode {
     MakerOnlyFailed,
     #[msg("Leaves quantity for an IOC order not set to 0 after execution!")]
     ImmediateOrCancelError,
+    #[msg("Nothing to crank! Try again later.")]
+    RbCrankEmpty,
+    #[msg("Wrong token account.")]
+    WrongTokenAccount,
+    #[msg("Wrong vault account.")]
+    WrongVaultAccount
 }

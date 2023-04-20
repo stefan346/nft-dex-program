@@ -1,15 +1,16 @@
 use anchor_lang::prelude::*;
 
-use super::{FilledExecReport};
+use super::FilledExecReport;
 
 #[zero_copy]
 #[derive(Debug)]
 pub struct Order {
-    pub price: u64,    // Limit price per unit of quantity.
-    cum_qty: u64,      // Amount executed.
-    cum_cost: u64,     // Cost of executed amount.
-    leaves_qty: u64,   // Amount open for further execution.
-    pub maker: Pubkey, // Order creator.
+    pub price: u64,                 // Limit price per unit of quantity.
+    cum_qty: u64,                   // Amount executed.
+    cum_cost: u64,                  // Cost of executed amount.
+    leaves_qty: u64,                // Amount open for further execution.
+    pub maker: Pubkey,              // Order creator.
+    pub recv_token_account: Pubkey, // Token account to receive the funds when matched.
 }
 
 impl Order {
@@ -25,13 +26,14 @@ impl Order {
         self.leaves_qty * self.price
     }
 
-    pub fn new(price: u64, qty: u64, maker: Pubkey) -> Order {
+    pub fn new(price: u64, qty: u64, maker: Pubkey, recv_token_account: Pubkey) -> Order {
         Order {
             price: price,
             cum_qty: 0,
             cum_cost: 0,
             leaves_qty: qty,
             maker,
+            recv_token_account,
         }
     }
 
@@ -39,7 +41,8 @@ impl Order {
         self.price = 0;
         self.cum_qty = 0;
         self.leaves_qty = 0;
-        self.maker = Pubkey::default()
+        self.maker = Pubkey::default();
+        self.recv_token_account = Pubkey::default();
     }
 
     pub fn get_leaves_qty(&self) -> u64 {
@@ -73,7 +76,7 @@ impl Order {
     pub fn execute_trade(
         &mut self,
         new_order: &mut Order,
-        is_buy: bool
+        is_buy: bool,
     ) -> Result<FilledExecReport> {
         let match_qty;
         if new_order.leaves_qty >= self.leaves_qty {
@@ -91,7 +94,7 @@ impl Order {
 
         let slot;
         let transact_time;
-        
+
         if cfg!(test) {
             slot = 1;
             transact_time = 2;

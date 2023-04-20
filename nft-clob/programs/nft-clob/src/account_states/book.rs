@@ -9,20 +9,22 @@ pub const MAX_ORDERS: u16 = 2048;
 /// Central Limit Order Book
 #[account(zero_copy)]
 pub struct Book {
-    pub base_mint: Pubkey,  // Mint for base currency
-    pub quote_mint: Pubkey, // Mint for quote currency
-    pub ask_min: u64,       // Best ask
-    pub bid_max: u64,       // Best bid
-    pub asks: Side,         // Ask side
-    pub bids: Side,         // Bid side
+    pub base_vault: Pubkey,  // Vault for base currency
+    pub quote_vault: Pubkey, // Vault for quote currency
+    pub instrmt: Pubkey,     // Instrument book belongs to
+    pub ask_min: u64,        // Best ask
+    pub bid_max: u64,        // Best bid
+    pub asks: Side,          // Ask side
+    pub bids: Side,          // Bid side
 }
 
 #[cfg(test)]
 impl Book {
     pub fn new() -> Self {
         Book {
-            base_mint: Pubkey::default(),
-            quote_mint: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            instrmt: Pubkey::default(),
             ask_min: 0,
             bid_max: 0,
             asks: Side::new(),
@@ -37,10 +39,11 @@ impl Book {
         &mut self,
         nos: &NewOrderSingleIx,
         maker: Pubkey,
+        recv_token_account: Pubkey,
         rb_filled_exec_report: &mut RingBufferFilledExecReport,
         rb_crank: &mut RingBufferCrank,
     ) -> Order {
-        let mut new_order = nos.into_order(maker);
+        let mut new_order = nos.into_order(maker, recv_token_account);
 
         let is_match = match nos.is_buy {
             true => |order_price: u64, nos_limit: u64| -> bool { order_price <= nos_limit },
@@ -52,9 +55,9 @@ impl Book {
             false => (&mut self.bids, nos.limit <= self.bid_max),
         };
 
-        let crank_mint = match nos.is_buy {
-            true => self.quote_mint,
-            false => self.base_mint,
+        let crank_vault = match nos.is_buy {
+            true => self.quote_vault,
+            false => self.base_vault,
         };
 
         if !match_side.is_empty() {
@@ -71,8 +74,8 @@ impl Book {
                     rb_filled_exec_report.insert(filled_exec_report);
 
                     rb_crank.insert(
-                        self.base_mint,
-                        self.quote_mint,
+                        crank_vault,
+                        match_side.orders[pos as usize].order.recv_token_account,
                         nos.is_buy,
                         maker,
                         filled_exec_report.quantity,
@@ -133,15 +136,15 @@ impl NewOrderSingleIx {
             order_type: crate::enums::OrderType::GTC,
         }
     }
-    pub fn into_order(&self, maker: Pubkey) -> Order {
-        Order::new(self.limit, self.size, maker)
+    pub fn into_order(&self, maker: Pubkey, recv_token_account: Pubkey) -> Order {
+        Order::new(self.limit, self.size, maker, recv_token_account)
     }
 }
 
 #[cfg(test)]
 mod test {
 
-    use crate::account_states::{RingBufferFilledExecReport, RingBufferCrank};
+    use crate::account_states::{RingBufferCrank, RingBufferFilledExecReport};
 
     use super::{Book, NewOrderSingleIx, MAX_ORDERS};
     use anchor_lang::prelude::Pubkey;
@@ -155,12 +158,13 @@ mod test {
         let mut rb_crank = RingBufferCrank::new();
         let sell_maker = Pubkey::new_unique();
         let buy_maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
 
         let sell_nos = NewOrderSingleIx::new(false, 10, 3);
         let buy_nos = NewOrderSingleIx::new(true, 9, 2);
 
-        book.new_limit(&sell_nos, sell_maker, &mut rb, &mut rb_crank);
-        book.new_limit(&buy_nos, buy_maker, &mut rb, &mut rb_crank);
+        book.new_limit(&sell_nos, sell_maker, recv_funds, &mut rb, &mut rb_crank);
+        book.new_limit(&buy_nos, buy_maker, recv_funds, &mut rb, &mut rb_crank);
 
         assert_eq!(book.ask_min, 10);
         assert_eq!(book.asks.orders[0].order.price, 10);
@@ -181,13 +185,14 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let size = 2;
         for i in sell_limits.iter() {
             if *i == 0 {
                 continue;
             }
             let sell_nos = NewOrderSingleIx::new(false, i.clone(), size);
-            book.new_limit(&sell_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&sell_nos, maker, recv_funds, &mut rb, &mut rb_crank);
         }
 
         sell_limits.sort();
@@ -209,12 +214,13 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let size = 2;
 
         let mut buy_limits = [10, 11, 12, 13, 14, 15, 16, 9, 25, 12, 8, 7, 8, 6, 6, 19];
         for i in buy_limits {
             let buy_nos = NewOrderSingleIx::new(true, i, size);
-            book.new_limit(&buy_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&buy_nos, maker, recv_funds, &mut rb, &mut rb_crank);
         }
 
         buy_limits.sort_by(|a, b| b.cmp(a));
@@ -231,16 +237,17 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let size = 2;
 
         for i in 1..MAX_ORDERS {
             let buy_nos = NewOrderSingleIx::new(true, i as u64, size);
-            book.new_limit(&buy_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&buy_nos, maker, recv_funds, &mut rb, &mut rb_crank);
         }
 
         for i in 1..MAX_ORDERS {
             let sell_nos = NewOrderSingleIx::new(false, i as u64, size);
-            book.new_limit(&sell_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&sell_nos, maker, recv_funds, &mut rb, &mut rb_crank);
         }
     }
 
@@ -250,14 +257,15 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
 
         let buy_nos_1 = NewOrderSingleIx::new(true, 11 as u64, 2);
-        book.new_limit(&buy_nos_1, maker, &mut rb, &mut rb_crank);
+        book.new_limit(&buy_nos_1, maker, recv_funds, &mut rb, &mut rb_crank);
         let buy_nos_2 = NewOrderSingleIx::new(true, 10 as u64, 4);
-        book.new_limit(&buy_nos_2, maker, &mut rb, &mut rb_crank);
+        book.new_limit(&buy_nos_2, maker, recv_funds, &mut rb, &mut rb_crank);
 
         let sell_nos_1 = NewOrderSingleIx::new(false, 10, 1);
-        book.new_limit(&sell_nos_1, maker, &mut rb, &mut rb_crank);
+        book.new_limit(&sell_nos_1, maker, recv_funds, &mut rb, &mut rb_crank);
 
         assert_eq!(book.asks.orders[0].order.get_leaves_qty(), 0);
         assert_eq!(book.asks.orders[0].order.get_cum_qty(), 0);
@@ -271,7 +279,7 @@ mod test {
         assert_eq!(book.bids.orders[1].order.price, 10);
 
         let sell_nos_2 = NewOrderSingleIx::new(false, 10, 2);
-        book.new_limit(&sell_nos_2, maker, &mut rb, &mut rb_crank);
+        book.new_limit(&sell_nos_2, maker, recv_funds, &mut rb, &mut rb_crank);
 
         assert_eq!(book.bids.orders[0].order.get_leaves_qty(), 0);
         assert_eq!(book.bids.orders[0].order.get_cum_qty(), 0);
@@ -288,16 +296,17 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
 
         let buy_nos_1 = NewOrderSingleIx::new(true, 182 as u64, 123);
         let buy_nos_2 = NewOrderSingleIx::new(true, 255 as u64, 184);
         let sell_nos_1 = NewOrderSingleIx::new(false, 23, 33);
         let sell_nos_2 = NewOrderSingleIx::new(false, 189, 31);
 
-        book.new_limit(&buy_nos_1, maker, &mut rb, &mut rb_crank);
-        book.new_limit(&sell_nos_1, maker, &mut rb, &mut rb_crank);
-        book.new_limit(&buy_nos_2, maker, &mut rb, &mut rb_crank);
-        book.new_limit(&sell_nos_2, maker, &mut rb, &mut rb_crank);
+        book.new_limit(&buy_nos_1, maker, recv_funds, &mut rb, &mut rb_crank);
+        book.new_limit(&sell_nos_1, maker, recv_funds, &mut rb, &mut rb_crank);
+        book.new_limit(&buy_nos_2, maker, recv_funds, &mut rb, &mut rb_crank);
+        book.new_limit(&sell_nos_2, maker, recv_funds, &mut rb, &mut rb_crank);
 
         assert_eq!(book.bids.tail, 0);
         assert_eq!(book.bids.head, 1);
@@ -313,6 +322,7 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let mut buy_orders = [(12, 216), (179, 98)].to_vec();
         let mut sell_orders = [(22, 100), (51, 147)].to_vec();
 
@@ -320,11 +330,11 @@ mod test {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
             let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&buy_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             let (price, size) = sell_orders.remove(0);
             let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&sell_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -350,6 +360,7 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let mut buy_orders = [(255, 95), (197, 236)].to_vec();
         let mut sell_orders = [(199, 196), (91, 3)].to_vec();
 
@@ -357,11 +368,11 @@ mod test {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
             let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&buy_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             let (price, size) = sell_orders.remove(0);
             let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&sell_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -385,6 +396,7 @@ mod test {
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let maker = Pubkey::new_unique();
+        let recv_funds = Pubkey::new_unique();
         let mut buy_orders = [(226, 135), (183, 46)].to_vec();
         let mut sell_orders = [(38, 157), (1, 148)].to_vec();
 
@@ -392,11 +404,11 @@ mod test {
             let (price, size) = buy_orders.remove(0);
             println!("price {}", price);
             let buy_nos = NewOrderSingleIx::new(true, price as u64, size);
-            book.new_limit(&buy_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&buy_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             let (price, size) = sell_orders.remove(0);
             let sell_nos = NewOrderSingleIx::new(false, price as u64, size);
-            book.new_limit(&sell_nos, maker, &mut rb, &mut rb_crank);
+            book.new_limit(&sell_nos, maker, recv_funds, &mut rb, &mut rb_crank);
 
             if buy_orders.len() == 0 && sell_orders.len() == 0 {
                 break;
@@ -434,6 +446,7 @@ mod test {
             .collect();
 
         let mut book = Book::new();
+        let recv_funds = Pubkey::new_unique();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
         let mut clone_buy = buy.clone();
@@ -504,12 +517,24 @@ mod test {
             if buy.len() > 0 {
                 let (bid_price, bid_size) = buy.remove(0);
                 let buy_nos = NewOrderSingleIx::new(true, bid_price as u64, bid_size as u64);
-                book.new_limit(&buy_nos, Pubkey::new_unique(), &mut rb, &mut rb_crank);
+                book.new_limit(
+                    &buy_nos,
+                    Pubkey::new_unique(),
+                    recv_funds,
+                    &mut rb,
+                    &mut rb_crank,
+                );
             }
             if sell.len() > 0 {
                 let (asks_price, ask_size) = sell.remove(0);
                 let buy_nos = NewOrderSingleIx::new(false, asks_price as u64, ask_size as u64);
-                book.new_limit(&buy_nos, Pubkey::new_unique(), &mut rb, &mut rb_crank);
+                book.new_limit(
+                    &buy_nos,
+                    Pubkey::new_unique(),
+                    recv_funds,
+                    &mut rb,
+                    &mut rb_crank,
+                );
             }
 
             if buy.len() == 0 && sell.len() == 0 {

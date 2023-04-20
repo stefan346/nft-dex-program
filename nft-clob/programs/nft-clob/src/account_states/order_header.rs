@@ -14,7 +14,7 @@ pub struct OrderHeader {
 impl OrderHeader {
     pub fn new() -> Self {
         Self {
-            order: Order::new(0, 0, Pubkey::default()),
+            order: Order::new(0, 0, Pubkey::default(),Pubkey::default()),
             next: 0,
             prev: 0,
             padding: [0; 4],

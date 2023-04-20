@@ -30,6 +30,11 @@ pub struct NewOrderSingleCtx<'info> {
     )]
     pub instrmt: Box<Account<'info, Instrmt>>,
 
+    #[account(
+        constraint = instrmt_grp.key() == instrmt.instrmt_grp
+    )]
+    pub instrmt_grp: Box<Account<'info, InstrmtGrp>>,
+
     #[account(mut)]
     pub rb_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
 
@@ -38,7 +43,7 @@ pub struct NewOrderSingleCtx<'info> {
 
     #[account(mut)]
     pub base_vault: Box<Account<'info, TokenAccount>>,
-    
+
     #[account(mut)]
     pub quote_vault: Box<Account<'info, TokenAccount>>,
 
@@ -78,28 +83,6 @@ impl<'info> NewOrderSingleCtx<'info> {
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
-
-    pub fn into_base_transfer_vault_to_user(
-        &self,
-    ) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        let cpi_accounts = Transfer {
-            from: self.base_vault.to_account_info().clone(),
-            to: self.base_user_token_account.to_account_info().clone(),
-            authority: self.instrmt.to_account_info().clone(),
-        };
-        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
-    }
-
-    pub fn into_quote_transfer_vault_to_user(
-        &self,
-    ) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        let cpi_accounts = Transfer {
-            from: self.quote_vault.to_account_info().clone(),
-            to: self.quote_user_token_account.to_account_info().clone(),
-            authority: self.instrmt.to_account_info().clone(),
-        };
-        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
-    }
 }
 
 pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<()> {
@@ -107,11 +90,17 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
     let rb_filled_exec_reports = &mut ctx.accounts.rb_filled_exec_reports.load_mut()?;
     let rb_crank = &mut ctx.accounts.rb_crank.load_mut()?;
 
+    let recv_token_account = match ix.is_buy {
+        true => ctx.accounts.base_user_token_account.key(),
+        false => ctx.accounts.quote_user_token_account.key(),
+    };
+
     let order = book.new_limit(
         &ix,
         ctx.accounts.authority.key(),
+        recv_token_account,
         rb_filled_exec_reports,
-        rb_crank
+        rb_crank,
     );
 
     match ix.order_type {
@@ -125,6 +114,14 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
         OrderType::MO => require!(!order.is_partially_filed(), ErrorCode::MakerOnlyFailed),
     };
 
+    let instrmt_grp_seeds = &[
+        b"instrmt-grp".as_ref(),
+        &ctx.accounts.instrmt_grp.admin.as_ref(),
+        &[ctx.accounts.instrmt_grp.bump],
+    ];
+
+    let signer = &[&instrmt_grp_seeds[..]];
+
     if ix.is_buy {
         // user deposit quote.
         // user receive base if partially filled.
@@ -134,10 +131,22 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
             ctx.accounts.into_quote_transfer_user_to_vault(),
             user_deposit_qty,
         )?;
-        token::transfer(
-            ctx.accounts.into_base_transfer_vault_to_user(),
-            order.get_cum_qty(),
-        )?;
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.base_vault.to_account_info().clone(),
+            to: ctx
+                .accounts
+                .base_user_token_account
+                .to_account_info()
+                .clone(),
+            authority: ctx.accounts.instrmt.to_account_info().clone(),
+        };
+        let cpi_context = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer,
+        );
+        token::transfer(cpi_context, order.get_cum_qty())?;
     } else {
         // user deposit base.
         // user receive quote but only the curent cumulative quantity.
@@ -150,8 +159,16 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
             ctx.accounts.into_base_transfer_user_to_vault(),
             user_deposit_qty,
         )?;
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.quote_vault.to_account_info().clone(),
+            to: ctx.accounts.quote_user_token_account.to_account_info().clone(),
+            authority: ctx.accounts.instrmt.to_account_info().clone(),
+        };
+        let cpi_context = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts, signer);
+
         token::transfer(
-            ctx.accounts.into_quote_transfer_vault_to_user(),
+            cpi_context,
             order.get_cum_cost(),
         )?;
     }
