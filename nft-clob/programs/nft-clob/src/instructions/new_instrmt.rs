@@ -5,7 +5,10 @@ use crate::account_states::*;
 use crate::errors::ErrorCode;
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
-pub struct NewInstrmtIx {}
+pub struct NewInstrmtIx {
+    pub base_symbol: String,
+    pub quote_symbol: String
+}
 
 #[derive(Accounts)]
 pub struct NewInstrmtCtx<'info> {
@@ -18,7 +21,8 @@ pub struct NewInstrmtCtx<'info> {
         bump = instrmt_grp.bump,
         realloc = InstrmtGrp::space(instrmt_grp.instrmts.len() + 1),
         realloc::payer = authority,
-        realloc::zero = false
+        realloc::zero = false,
+        constraint = instrmt_grp.admin == authority.key() @ ErrorCode::NotAdmin
     )]
     pub instrmt_grp: Box<Account<'info, InstrmtGrp>>,
 
@@ -32,7 +36,7 @@ pub struct NewInstrmtCtx<'info> {
     pub instrmt: Box<Account<'info, Instrmt>>,
 
     #[account(zero)]
-    pub top_of_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
+    pub rb_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
 
     #[account(zero)]
     pub book: AccountLoader<'info, Book>,
@@ -75,25 +79,33 @@ pub fn handler(ctx: Context<NewInstrmtCtx>, ix: NewInstrmtIx) -> Result<()> {
 
     let instrmt = &mut ctx.accounts.instrmt;
 
+    instrmt.instrmt_grp = ctx.accounts.instrmt_grp.key();
+
     instrmt.base_mint = ctx.accounts.base_mint.key();
     instrmt.base_vault = ctx.accounts.base_vault.key();
 
     instrmt.quote_mint = ctx.accounts.quote_mint.key();
     instrmt.quote_vault = ctx.accounts.quote_vault.key();
 
-    let book = &mut ctx.accounts.book.load_init()?;
-
+    instrmt.base_symbol = Instrmt::to_u8_array(ix.base_symbol);
+    instrmt.quote_symbol = Instrmt::to_u8_array(ix.quote_symbol);
+    
     instrmt.book = ctx.accounts.book.key();
     instrmt.bumps = InstrmtBumps {
         base_vault_bump: *ctx.bumps.get("base_vault").unwrap(),
         quote_vault_bump: *ctx.bumps.get("quote_vault").unwrap(),
         instrmt_bump: *ctx.bumps.get("instrmt").unwrap()
     };
-
-    let top_of_filled_exec_reports = &mut ctx.accounts.top_of_filled_exec_reports.load_init()?;
-
-    top_of_filled_exec_reports.next_index = 0;
-    instrmt.top_of_filled_exec_reports = ctx.accounts.top_of_filled_exec_reports.key();
+    
+    let rb_filled_exec_reports = &mut ctx.accounts.rb_filled_exec_reports.load_init()?;
+    
+    rb_filled_exec_reports.next_index = 0;
+    instrmt.rb_filled_exec_reports = ctx.accounts.rb_filled_exec_reports.key();
+    
+    let book = &mut ctx.accounts.book.load_init()?;
+    
+    book.base_mint = ctx.accounts.base_mint.key();
+    book.quote_mint = ctx.accounts.quote_mint.key();
 
     book.ask_min = 0;
     book.bid_max = 0;

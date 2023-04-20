@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use super::FilledExecReport;
+use super::{FilledExecReport};
 
 #[zero_copy]
 #[derive(Debug)]
@@ -73,7 +73,7 @@ impl Order {
     pub fn execute_trade(
         &mut self,
         new_order: &mut Order,
-        is_buy: bool,
+        is_buy: bool
     ) -> Result<FilledExecReport> {
         let match_qty;
         if new_order.leaves_qty >= self.leaves_qty {

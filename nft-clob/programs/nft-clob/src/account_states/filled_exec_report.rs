@@ -13,6 +13,7 @@ pub struct RingBufferFilledExecReport {
     pub next_index: u8,
     pub padding: [u8; 7],
 }
+
 #[cfg(test)]
 impl RingBufferFilledExecReport {
     pub fn new() -> Self {

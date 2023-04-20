@@ -26,13 +26,20 @@ pub struct NewOrderSingleCtx<'info> {
         constraint = instrmt.quote_vault == quote_vault.key(),
         constraint = instrmt.base_mint == base_user_token_account.mint,
         constraint = instrmt.quote_mint == quote_user_token_account.mint,
-        constraint = instrmt.top_of_filled_exec_reports == top_of_filled_exec_reports.key(),
+        constraint = instrmt.rb_filled_exec_reports == rb_filled_exec_reports.key(),
     )]
     pub instrmt: Box<Account<'info, Instrmt>>,
 
-    pub top_of_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
+    #[account(mut)]
+    pub rb_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
 
+    #[account(mut, constraint = rb_crank.load()?.instrmt_grp == instrmt.instrmt_grp)]
+    pub rb_crank: AccountLoader<'info, RingBufferCrank>,
+
+    #[account(mut)]
     pub base_vault: Box<Account<'info, TokenAccount>>,
+    
+    #[account(mut)]
     pub quote_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = base_user_token_account.owner == authority.key())]
@@ -97,13 +104,14 @@ impl<'info> NewOrderSingleCtx<'info> {
 
 pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<()> {
     let book = &mut ctx.accounts.book.load_mut()?;
-    let instrmt = &mut ctx.accounts.instrmt;
-    let top_of_filled_exec_reports = &mut ctx.accounts.top_of_filled_exec_reports.load_mut()?;
+    let rb_filled_exec_reports = &mut ctx.accounts.rb_filled_exec_reports.load_mut()?;
+    let rb_crank = &mut ctx.accounts.rb_crank.load_mut()?;
 
     let order = book.new_limit(
         &ix,
         ctx.accounts.authority.key(),
-        top_of_filled_exec_reports,
+        rb_filled_exec_reports,
+        rb_crank
     );
 
     match ix.order_type {
