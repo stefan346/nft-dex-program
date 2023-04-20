@@ -24,12 +24,15 @@ pub struct NewInstrmtCtx<'info> {
 
     #[account(
         init,
-        seeds = [b"instrmt", book.key()],
+        seeds = [b"instrmt", book.key().as_ref()],
         payer = authority,
         bump,
         space = Instrmt::space()
     )]
     pub instrmt: Box<Account<'info, Instrmt>>,
+
+    #[account(zero)]
+    pub top_of_filled_exec_reports: AccountLoader<'info, RingBufferFilledExecReport>,
 
     #[account(zero)]
     pub book: AccountLoader<'info, Book>,
@@ -70,7 +73,7 @@ pub fn handler(ctx: Context<NewInstrmtCtx>, ix: NewInstrmtIx) -> Result<()> {
     let instrmt_grp = &mut ctx.accounts.instrmt_grp;
     instrmt_grp.instrmts.push(ctx.accounts.instrmt.key());
 
-    let instrmt = &mut ctx.accounts.instrmt.load_init()?;
+    let instrmt = &mut ctx.accounts.instrmt;
 
     instrmt.base_mint = ctx.accounts.base_mint.key();
     instrmt.base_vault = ctx.accounts.base_vault.key();
@@ -84,9 +87,13 @@ pub fn handler(ctx: Context<NewInstrmtCtx>, ix: NewInstrmtIx) -> Result<()> {
     instrmt.bumps = InstrmtBumps {
         base_vault_bump: *ctx.bumps.get("base_vault").unwrap(),
         quote_vault_bump: *ctx.bumps.get("quote_vault").unwrap(),
+        instrmt_bump: *ctx.bumps.get("instrmt").unwrap()
     };
 
-    instrmt.top_of_filled_exec_reports.next_index = 0;
+    let top_of_filled_exec_reports = &mut ctx.accounts.top_of_filled_exec_reports.load_init()?;
+
+    top_of_filled_exec_reports.next_index = 0;
+    instrmt.top_of_filled_exec_reports = ctx.accounts.top_of_filled_exec_reports.key();
 
     book.ask_min = 0;
     book.bid_max = 0;

@@ -7,7 +7,7 @@ use super::Order;
 const REPORT_SIZE: u8 = 200;
 
 // Ring Buffer Filled Execution Report
-#[zero_copy]
+#[account(zero_copy)]
 pub struct RingBufferFilledExecReport {
     pub filled_exec_reports: [FilledExecReport; REPORT_SIZE as usize],
     pub next_index: u8,

@@ -13,6 +13,10 @@ pub struct Order {
 }
 
 impl Order {
+    /// Used for IOC orders as we don't want an order with a leaves qty after trade execution.
+    pub fn clear_leaves_qty(&mut self) {
+        self.leaves_qty = 0;
+    }
     pub fn get_cum_cost(&self) -> u64 {
         self.cum_cost
     }

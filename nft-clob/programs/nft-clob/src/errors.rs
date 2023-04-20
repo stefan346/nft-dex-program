@@ -8,4 +8,6 @@ pub enum ErrorCode {
     FillOrKillFailed,
     #[msg("Order executed partially or fully as taker.")]
     MakerOnlyFailed,
+    #[msg("Leaves quantity for an IOC order not set to 0 after execution!")]
+    ImmediateOrCancelError,
 }

@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
 
-use super::RingBufferFilledExecReport;
-
 /// Instrument
 #[account]
+#[derive(Default)]
 pub struct Instrmt {
     pub base_mint: Pubkey,                  // Base currency.
     pub base_vault: Pubkey,                 // Vault to store base currency.
@@ -14,11 +13,11 @@ pub struct Instrmt {
     pub bumps: InstrmtBumps,                // Bumps,
 }
 
-
-#[derive(AnchorDeserialize, AnchorSerialize)]
+#[derive(Default, Clone, AnchorDeserialize, AnchorSerialize)]
 pub struct InstrmtBumps {
     pub base_vault_bump: u8,
     pub quote_vault_bump: u8,
+    pub instrmt_bump: u8,
 }
 
 impl Instrmt {

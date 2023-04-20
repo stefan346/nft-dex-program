@@ -77,6 +77,7 @@ impl Book {
         }
 
         if nos.order_type == OrderType::IOC {
+            new_order.clear_leaves_qty();
             return new_order;
         }
 
