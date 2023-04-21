@@ -177,18 +177,16 @@ mod test {
         enums::OrderType,
     };
 
-    use super::{Book, NewOrderSingleIx, MAX_ORDERS};
-    use anchor_lang::prelude::Pubkey;
+    use super::{Book, MAX_ORDERS};
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
     const GTC: OrderType = OrderType::GTC;
+    
     #[test]
     fn it_should_add_single_order_to_both_sides() {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let sell_maker = Pubkey::new_unique();
-        let buy_maker = Pubkey::new_unique();
 
         let sell_nos = Order::new_test(10, 3);
         let buy_nos = Order::new_test(9, 2);
@@ -212,8 +210,6 @@ mod test {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let maker = Pubkey::new_unique();
-        let recv_funds = Pubkey::new_unique();
         let size = 2;
         for i in sell_limits.iter() {
             if *i == 0 {
@@ -241,8 +237,6 @@ mod test {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let maker = Pubkey::new_unique();
-        let recv_funds = Pubkey::new_unique();
         let size = 2;
 
         let mut buy_limits = [10, 11, 12, 13, 14, 15, 16, 9, 25, 12, 8, 7, 8, 6, 6, 19];
@@ -264,8 +258,6 @@ mod test {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let maker = Pubkey::new_unique();
-        let recv_funds = Pubkey::new_unique();
         let size = 2;
 
         for i in 1..MAX_ORDERS {
@@ -284,8 +276,6 @@ mod test {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let maker = Pubkey::new_unique();
-        let recv_funds = Pubkey::new_unique();
 
         let buy_nos_1 = Order::new_test(11 as u64, 2);
         book.new_limit(buy_nos_1, GTC, true, &mut rb, &mut rb_crank);
@@ -323,8 +313,6 @@ mod test {
         let mut book = Book::new();
         let mut rb = RingBufferFilledExecReport::new();
         let mut rb_crank = RingBufferCrank::new();
-        let maker = Pubkey::new_unique();
-        let recv_funds = Pubkey::new_unique();
 
         let buy_nos_1 = Order::new_test(182, 123);
         let buy_nos_2 = Order::new_test(255, 184);
