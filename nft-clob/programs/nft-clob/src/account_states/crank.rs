@@ -30,7 +30,7 @@ impl Crank {
         Self {
             maker: Pubkey::default(),
             vault: Pubkey::default(),
-            token_account: Pubkey::default(),
+            token_acc: Pubkey::default(),
             quantity: 0,
         }
     }
@@ -44,7 +44,7 @@ impl RingBufferCrank {
         is_buy: bool,
         maker: Pubkey,
         quantity: u64,
-        price: u64,
+        limit: u64,
     ) {
         if self.head == self.next {
             panic!("rb-crank filled up. Crank faster to accept new orders!");
@@ -55,7 +55,7 @@ impl RingBufferCrank {
                 maker,
                 vault,
                 token_account,
-                quantity.checked_add(price).unwrap(),
+                quantity.checked_add(limit).unwrap(),
             ),
             false => Crank::new(maker, vault, token_account, quantity),
         };
@@ -78,19 +78,19 @@ impl RingBufferCrank {
 
 #[zero_copy]
 pub struct Crank {
-    maker: Pubkey,         // Maker.
-    vault: Pubkey,         // Mint to transfer to maker.
-    token_account: Pubkey, // Mint to transfer to maker.
-    quantity: u64,         // Total quantity filled.
+    maker: Pubkey,     // Maker.
+    vault: Pubkey,     // Mint to transfer to maker.
+    token_acc: Pubkey, // Mint to transfer to maker.
+    quantity: u64,     // Total quantity filled.
 }
 
 impl Crank {
-    pub fn new(maker: Pubkey, vault: Pubkey, token_account: Pubkey, quantity: u64) -> Self {
+    pub fn new(maker: Pubkey, vault: Pubkey, token_acc: Pubkey, quantity: u64) -> Self {
         Self {
             maker,
             vault,
             quantity,
-            token_account,
+            token_acc,
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -102,7 +102,7 @@ impl Crank {
     }
 
     pub fn get_token_account(&self) -> Pubkey {
-        self.token_account
+        self.token_acc
     }
 
     pub fn get_vault(&self) -> Pubkey {
@@ -116,7 +116,7 @@ impl Crank {
     pub fn clear(&mut self) {
         self.maker = Pubkey::default();
         self.vault = Pubkey::default();
-        self.token_account = Pubkey::default();
+        self.token_acc = Pubkey::default();
         self.quantity = 0;
     }
 

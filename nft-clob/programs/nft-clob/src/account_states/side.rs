@@ -1,10 +1,11 @@
-use anchor_lang::zero_copy;
+use anchor_lang::{prelude::Pubkey, zero_copy};
 
-use super::{Order, OrderHeader, MAX_ORDERS};
+use super::{Order, OrderHeader, RingBufferCrank, MAX_ORDERS};
 
 #[zero_copy]
 pub struct Side {
     pub orders: [OrderHeader; MAX_ORDERS as usize],
+    pub vault: Pubkey, // Vault for order deposits
     tombstone: u16,
     pub head: u16,
     pub tail: u16,
@@ -16,6 +17,7 @@ impl Side {
     pub fn new() -> Self {
         Self {
             orders: [OrderHeader::new(); MAX_ORDERS as usize],
+            vault: Pubkey::default(),
             tombstone: 0,
             head: 0,
             tail: 0,
@@ -30,30 +32,30 @@ impl Side {
     }
 
     pub fn best_offer(&self) -> u64 {
-        self.orders[self.head as usize].order.price
+        self.orders[self.head as usize].order.limit
     }
 
     pub fn is_better_than_best(&self, new_order: &Order, is_buy: bool) -> bool {
-        let price = self.orders[self.head as usize].order.price;
+        let price = self.orders[self.head as usize].order.limit;
         if price == 0 {
             return true;
         }
         if is_buy {
-            new_order.price > price
+            new_order.limit > price
         } else {
-            new_order.price < price
+            new_order.limit < price
         }
     }
 
     pub fn is_worse_than_worst(&self, new_order: Order, is_buy: bool) -> bool {
-        let price = self.orders[self.tail as usize].order.price;
-        if price == 0 {
+        let limit = self.orders[self.tail as usize].order.limit;
+        if limit == 0 {
             return false;
         }
         if is_buy {
-            price >= new_order.price
+            limit >= new_order.limit
         } else {
-            price <= new_order.price
+            limit <= new_order.limit
         }
     }
 
@@ -132,7 +134,8 @@ impl Side {
     }
 
     // Constant O(1)
-    pub fn remove_order(&mut self, ord_pos: u16) {
+    pub fn remove_order(&mut self, ord_pos: u16) -> Order {
+        let order = self.orders[ord_pos as usize].order;
         if self.is_head(ord_pos) {
             let next = self.orders[ord_pos as usize].next;
             self.orders[next as usize].prev = next;
@@ -152,16 +155,25 @@ impl Side {
         self.new_tombstone(ord_pos);
 
         self.orders[ord_pos as usize].order.clear();
+        order
     }
 
-    pub fn insert_order(&mut self, new_order: Order, is_buy: bool) {
+    pub fn insert_order(&mut self, new_order: Order, is_buy: bool, rb_crank: &mut RingBufferCrank) {
         // Insert in constant time O(1)
         if new_order.is_partially_filed() || self.is_better_than_best(&new_order, is_buy) {
             let new_order_pos = match self.next_tombstone() {
                 None => {
                     // Cancel tail
                     let tail = self.tail;
-                    self.remove_order(self.tail);
+                    let removed_order = self.remove_order(self.tail);
+                    rb_crank.insert(
+                        self.vault,
+                        removed_order.payment_acc,
+                        is_buy,
+                        removed_order.maker,
+                        removed_order.get_leaves_qty(),
+                        removed_order.limit,
+                    );
                     tail
                 }
                 Some(pos) => pos,
@@ -186,7 +198,15 @@ impl Side {
                         None => {
                             // Cancel tail
                             let tail = self.tail;
-                            self.remove_order(self.tail);
+                            let removed_order = self.remove_order(self.tail);
+                            rb_crank.insert(
+                                self.vault,
+                                removed_order.payment_acc,
+                                is_buy,
+                                removed_order.maker,
+                                removed_order.get_leaves_qty(),
+                                removed_order.limit,
+                            );
                             tail
                         }
                         Some(tombstone_pos) => tombstone_pos,

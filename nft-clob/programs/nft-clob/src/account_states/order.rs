@@ -5,12 +5,28 @@ use super::FilledExecReport;
 #[zero_copy]
 #[derive(Debug)]
 pub struct Order {
-    pub price: u64,                 // Limit price per unit of quantity.
-    cum_qty: u64,                   // Amount executed.
-    cum_cost: u64,                  // Cost of executed amount.
-    leaves_qty: u64,                // Amount open for further execution.
-    pub maker: Pubkey,              // Order creator.
-    pub recv_token_account: Pubkey, // Token account to receive the funds when matched.
+    pub limit: u64,           // Limit price per unit of quantity.
+    cum_qty: u64,             // Amount executed.
+    cum_cost: u64,            // Cost of executed amount.
+    leaves_qty: u64,          // Amount open for further execution.
+    pub maker: Pubkey,        // Order creator.
+    pub payout_acc: Pubkey,   // Token account to receive the funds from an executed trade.
+    pub payment_acc: Pubkey, // Token account for the deposit required to place an order.
+}
+
+#[cfg(test)]
+impl Order {
+    pub fn new_test(limit:u64, qty: u64) -> Self {
+        Order {
+            limit: limit,
+            cum_qty: 0,
+            cum_cost: 0,
+            leaves_qty: qty,
+            maker: Pubkey::default(),
+            payout_acc: Pubkey::default(),
+            payment_acc: Pubkey::default()
+        }
+    }
 }
 
 impl Order {
@@ -23,26 +39,34 @@ impl Order {
     }
 
     pub fn get_leaves_cost(&self) -> u64 {
-        self.leaves_qty * self.price
+        self.leaves_qty * self.limit
     }
 
-    pub fn new(price: u64, qty: u64, maker: Pubkey, recv_token_account: Pubkey) -> Order {
+    pub fn new(
+        limit: u64,
+        qty: u64,
+        maker: Pubkey,
+        payout_acc: Pubkey,
+        payment_acc: Pubkey,
+    ) -> Order {
         Order {
-            price: price,
+            limit: limit,
             cum_qty: 0,
             cum_cost: 0,
             leaves_qty: qty,
             maker,
-            recv_token_account,
+            payout_acc,
+            payment_acc
         }
     }
 
     pub fn clear(&mut self) {
-        self.price = 0;
+        self.limit = 0;
         self.cum_qty = 0;
         self.leaves_qty = 0;
         self.maker = Pubkey::default();
-        self.recv_token_account = Pubkey::default();
+        self.payout_acc = Pubkey::default();
+        self.payment_acc = Pubkey::default();
     }
 
     pub fn get_leaves_qty(&self) -> u64 {
@@ -62,13 +86,13 @@ impl Order {
     }
 
     pub fn is_better_than(&self, other: &Order, is_buy: bool) -> bool {
-        if other.price == 0 {
+        if other.limit == 0 {
             return true;
         }
         if is_buy {
-            self.price > other.price
+            self.limit > other.limit
         } else {
-            self.price < other.price
+            self.limit < other.limit
         }
     }
 
@@ -90,7 +114,7 @@ impl Order {
 
         new_order.leaves_qty -= match_qty;
         new_order.cum_qty += match_qty;
-        new_order.cum_cost += match_qty.checked_mul(self.price).unwrap();
+        new_order.cum_cost += match_qty.checked_mul(self.limit).unwrap();
 
         let slot;
         let transact_time;
@@ -106,7 +130,7 @@ impl Order {
             self.maker,
             new_order.maker,
             match_qty,
-            self.price,
+            self.limit,
             is_buy,
             slot,
             transact_time,

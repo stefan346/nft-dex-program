@@ -106,8 +106,8 @@ pub fn handler(ctx: Context<NewInstrmtCtx>, ix: NewInstrmtIx) -> Result<()> {
 
     book.instrmt = instrmt.key();
 
-    book.base_vault = ctx.accounts.base_vault.key();
-    book.quote_vault = ctx.accounts.quote_vault.key();
+    book.set_base_vault(ctx.accounts.base_vault.key());
+    book.set_quote_vault(ctx.accounts.quote_vault.key());
 
     book.ask_min = 0;
     book.bid_max = 0;
