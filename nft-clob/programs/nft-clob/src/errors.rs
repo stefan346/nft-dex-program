@@ -15,5 +15,9 @@ pub enum ErrorCode {
     #[msg("Wrong token account.")]
     WrongTokenAccount,
     #[msg("Wrong vault account.")]
-    WrongVaultAccount
+    WrongVaultAccount,
+    #[msg("Unauthorized order cancellation.")]
+    UnauthorizedOrderCancellation,
+    #[msg("Order is tombstone!")]
+    TombstoneOrder,
 }

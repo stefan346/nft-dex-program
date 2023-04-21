@@ -59,6 +59,10 @@ impl Side {
         }
     }
 
+    pub fn is_tombstone(&self, pos: u16) -> bool {
+        self.orders[pos as usize].order.is_tombstone()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.orders[self.head as usize].order.is_tombstone()
     }
