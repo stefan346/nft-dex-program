@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Side {
+pub enum BookSide {
     Sell,
     Buy,
 }

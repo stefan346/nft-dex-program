@@ -21,6 +21,7 @@ pub struct SwapNftCtx<'info> {
     )]
     pub nft_token_account: Box<Account<'info, TokenAccount>>,
 
+    /// CHECK:
     #[account(
         // address = Metadata::id(),
         seeds = [b"metadata", Metadata::id().as_ref(), nft_mint.key().as_ref()],

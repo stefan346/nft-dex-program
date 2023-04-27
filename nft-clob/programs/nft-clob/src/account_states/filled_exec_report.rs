@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::enums::Side;
+use crate::enums::BookSide;
 
 use super::Order;
 
@@ -82,9 +82,9 @@ impl FilledExecReport {
             slot,
             transact_time,
             side: if is_buy {
-                Side::Buy as u8
+                BookSide::Buy as u8
             } else {
-                Side::Sell as u8
+                BookSide::Sell as u8
             },
             padding: [0u8; 7],
         }
