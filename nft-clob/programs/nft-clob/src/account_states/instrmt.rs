@@ -25,7 +25,7 @@ pub struct InstrmtBumps {
 
 impl Instrmt {
     pub fn space() -> usize {
-        8 + 7 * 32 + InstrmtBumps::space() + 6
+        8  + 20 + 7 * 32 + InstrmtBumps::space()
     }
 
     pub fn to_u8_array(a: String) -> [u8; 10] {
@@ -38,6 +38,6 @@ impl Instrmt {
 
 impl InstrmtBumps {
     pub fn space() -> usize {
-        1 + 1
+        1 + 1 + 1
     }
 }

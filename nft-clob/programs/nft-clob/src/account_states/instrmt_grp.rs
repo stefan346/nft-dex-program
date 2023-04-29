@@ -14,6 +14,6 @@ pub struct InstrmtGrp {
 
 impl InstrmtGrp {
     pub fn space(len: usize) -> usize {
-        8 + (4 + 32 * len) + 1
+        8 + 32 + (4 + 32 * len) + 1
     }
 }

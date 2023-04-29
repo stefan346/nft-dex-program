@@ -132,7 +132,7 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
     if ix.is_buy {
         // user deposit quote.
         // user receive base if partially filled.
-        let leaves_cost: u64 = order.get_leaves_cost().checked_mul(order.limit).unwrap();
+        let leaves_cost: u64 = order.get_leaves_cost().unwrap();
         let user_deposit_qty = leaves_cost.checked_add(order.get_cum_cost()).unwrap();
         token::transfer(
             ctx.accounts.into_quote_transfer_user_to_vault(),
@@ -146,7 +146,7 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
                 .base_user_token_account
                 .to_account_info()
                 .clone(),
-            authority: ctx.accounts.instrmt.to_account_info().clone(),
+            authority: ctx.accounts.instrmt_grp.to_account_info().clone(),
         };
         let cpi_context = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -174,7 +174,7 @@ pub fn handler(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<
                 .quote_user_token_account
                 .to_account_info()
                 .clone(),
-            authority: ctx.accounts.instrmt.to_account_info().clone(),
+            authority: ctx.accounts.instrmt_grp.to_account_info().clone(),
         };
         let cpi_context = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),

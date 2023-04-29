@@ -9,6 +9,7 @@ pub enum BookSide {
 
 /// All order types must have a limit price upon placement.
 #[derive(Debug, Copy, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
+#[repr(u8)]
 pub enum OrderType {
     /// A Good-Til-Cancelled order (GTC) is a buy or sell order that remains
     /// active until it is either executed or until the user cancels it.

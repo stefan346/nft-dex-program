@@ -38,8 +38,8 @@ impl Order {
         self.cum_cost
     }
 
-    pub fn get_leaves_cost(&self) -> u64 {
-        self.leaves_qty * self.limit
+    pub fn get_leaves_cost(&self) -> Option<u64> {
+        self.leaves_qty.checked_mul(self.limit)
     }
 
     pub fn new(

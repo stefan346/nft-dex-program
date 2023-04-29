@@ -23,8 +23,9 @@ pub struct NewInstrmtGrpCtx<'info> {
 }
 
 pub fn handler(ctx: Context<NewInstrmtGrpCtx>) -> Result<()> {
+    let mut rb_crank = ctx.accounts.rb_crank.load_init()?;
+
     let instrmt_grp = &mut ctx.accounts.instrmt_grp;
-    let rb_crank = &mut ctx.accounts.rb_crank.load_init()?;
 
     rb_crank.instrmt_grp = instrmt_grp.key();
 

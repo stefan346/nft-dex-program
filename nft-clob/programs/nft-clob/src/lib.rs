@@ -37,7 +37,7 @@ pub mod nft_clob {
         new_nft_pool::handler(ctx, ix)
     }
 
-
-
-
+    pub fn new_order_single(ctx: Context<NewOrderSingleCtx>, ix: NewOrderSingleIx) -> Result<()> {
+        new_order_single::handler(ctx, ix)
+    }
 }
