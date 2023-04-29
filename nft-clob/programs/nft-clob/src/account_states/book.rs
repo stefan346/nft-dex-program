@@ -9,7 +9,8 @@ pub const MAX_ORDERS: u16 = 2048;
 /// Central Limit Order Book
 #[account(zero_copy)]
 pub struct Book {
-    pub instrmt: Pubkey, // Instrument book belongs to
+    pub instrmt: Pubkey, // Instrument that the book belongs to
+    pub last_price: u64, // Limit of last executed trade
     pub ask_min: u64,    // Best ask
     pub bid_max: u64,    // Best bid
     pub asks: Side,      // Ask side
@@ -21,6 +22,7 @@ impl Book {
     pub fn new() -> Self {
         Book {
             instrmt: Pubkey::default(),
+            last_price: 0,
             ask_min: 0,
             bid_max: 0,
             asks: Side::new(),
@@ -100,6 +102,9 @@ impl Book {
                         .execute_trade(&mut new_order, is_buy)
                         .unwrap();
                     rb_filled_exec_report.insert(filled_exec_report);
+
+                    // Update the books' last price
+                    self.last_price = filled_exec_report.price;
 
                     rb_crank.insert(
                         crank_vault,
@@ -181,7 +186,7 @@ mod test {
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
     const GTC: OrderType = OrderType::GTC;
-    
+
     #[test]
     fn it_should_add_single_order_to_both_sides() {
         let mut book = Book::new();
